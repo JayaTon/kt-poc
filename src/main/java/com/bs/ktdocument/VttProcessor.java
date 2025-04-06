@@ -5,12 +5,15 @@ import org.apache.poi.xwpf.usermodel.*;
 
 import java.io.*;
 import java.nio.file.*;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.*; // For HTTP requests to OpenAI API
 import org.apache.poi.xwpf.usermodel.*;
+import org.json.JSONObject;
 
 public class VttProcessor {
     private static final String OPENAI_API_KEY = System.getenv("OPENAI_API_KEY");
@@ -88,20 +91,67 @@ public class VttProcessor {
         }
     }
 
+    public static void saveToWord(String jsonResponse, String fileName) throws IOException {
+        String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
+        String wordFileName = new File(fileName).getName().replace(".vtt", "_"+timeStamp+"_KT_Document.docx");
+        String wordFilePath = OUTPUT_FOLDER + "/" + wordFileName;
 
+        // Parse JSON to extract the content
+        JSONObject jsonObject = new JSONObject(jsonResponse);
+        String content = jsonObject.getJSONArray("choices")
+                .getJSONObject(0)
+                .getJSONObject("message")
+                .getString("content");
 
+        // Create Word Document
+        XWPFDocument document = new XWPFDocument();
 
+        // Split content into lines
+        String[] lines = content.split("\n");
 
-    private String extractContent(String responseBody) {
-        int startIndex = responseBody.indexOf("\"content\":\"") + 10;
-        int endIndex = responseBody.indexOf("\"}", startIndex);
-        if (startIndex > 10 && endIndex > startIndex) {
-            return responseBody.substring(startIndex, endIndex).replace("\\n", "\n");
+        for (String line : lines) {
+            XWPFParagraph paragraph = document.createParagraph();
+            XWPFRun run = paragraph.createRun();
+
+            line = line.trim(); // Trim whitespace
+
+            // Convert headings
+            if (line.startsWith("###")) {
+                paragraph.setStyle("Heading1");
+                run.setBold(true);
+                run.setFontSize(14);
+                run.setText(line.replace("###", "").trim());
+            } else if (line.startsWith("####")) {
+                paragraph.setStyle("Heading2");
+                run.setBold(true);
+                run.setFontSize(12);
+                run.setText(line.replace("####", "").trim());
+            }
+            // Convert numbered list while removing **
+            else if (line.matches("^\\d+\\.\\s\\*\\*(.*?)\\*\\*.*$")) {
+                paragraph.setSpacingAfter(200);
+                line = line.replaceAll("\\*\\*(.*?)\\*\\*", "$1"); // Remove ** from bold text
+                run.setBold(true);
+                run.setText(line);
+            }
+            // Convert normal text and remove **
+            else {
+                run.setText(line.replaceAll("\\*\\*(.*?)\\*\\*", "$1")); // Remove ** from bold text
+            }
         }
-        return "Error extracting content.";
+
+        // Save Word file
+        try (FileOutputStream out = new FileOutputStream(wordFilePath)) {
+            document.write(out);
+        }
+        document.close();
+
+        System.out.println("KT Document saved successfully as " + fileName);
     }
 
-    private void saveToWord(String content, String vttFilePath) {
+
+    @Deprecated
+    private void saveToWord1(String content, String vttFilePath) {
         try (XWPFDocument document = new XWPFDocument()) {
             String[] sections = content.split("FAQs:", 2);
             String ktSection = sections[0].trim();
@@ -126,9 +176,9 @@ public class VttProcessor {
             faqRun.setText(faqSection);
 
             // Save file
+
             String wordFileName = new File(vttFilePath).getName().replace(".vtt", "_KT_Document.docx");
             String wordFilePath = OUTPUT_FOLDER + "/" + wordFileName;
-
             try (FileOutputStream out = new FileOutputStream(wordFilePath)) {
                 document.write(out);
             }
